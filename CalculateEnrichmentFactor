@@ -1,0 +1,334 @@
+#This program compares the inter-residue contacts of two group of homologues with 
+#distinct characteristics (e.g. one hyperthermophilic, the other psicrophilic; one
+#hydrolases, the other transferases) to produce an enrichment factor that indicates
+#the residues that can switch an enzyme from one group to the other.
+
+#require input:
+#txt file containing the pdbID of references separated by \n (jump of line)
+#CMView gerated contact maps (saved as ID.txt)
+#CMView generated alignments (load target compare with reference, saved as ID.fasta)
+#List of ID of group 1
+#List of ID of group 2
+#Name of group 1
+#Name of group 2
+
+#produce output:
+#tables containing the target enzymes residues equivalent to the reference enzyme residues
+#tables containing the target enzymes residues positions equivalent to the reference enzyme residues positions
+#tables containing the enrichment factors
+
+#####Data Input
+
+#complete path to contact maps ending with / (only the path, no file name):
+path2CM=".../MyContactMethods/ComparingCM/alpha-amylase/CM/"
+
+#complete path to aligments ending with / (only the path, no file name):
+path2CMalignments=".../MyContactMethods/ComparingCM/alpha-amylase/alignment/"
+
+#file name (with path) of the list of pdbID to be used as target (separated by line jump)
+path2pdbIDtarget=".../MyContactMethods/ComparingCM/alpha-amylase/targetID.txt"
+
+#file name (with path) of the list of pdbID to be used as group1 (separated by line jump)
+path2pdbIDgroup1=".../MyContactMethods/ComparingCM/alpha-amylase/transferaseID.txt"
+
+#file name (with path) of the list of pdbID to be used as group2 (separated by line jump)
+path2pdbIDgroup2=".../MyContactMethods/ComparingCM/alpha-amylase/hydrolaseID.txt"
+
+#write pdbID to use as reference
+referencePDB="AmyA_relaxed"
+
+#working directory where you want to write output files with complete path ending in /
+workingDirectory=".../MyContactMethods/ComparingCM/alpha-amylase/"
+
+#GroupsNames
+Group1name="Group1-Glucosyltransferase"
+Group2name="Group2-Glucosylhydrolase"
+
+#####functions used for the program
+
+#read file with pdbID of sequence to analyze separated by \n
+readPDBID=function(fileID){
+  pdbID=scan(fileID, what=character(), sep="\n")
+  return(pdbID)
+}
+
+#read alignment (function definition)
+readAlignment=function(file2){
+  AlignmentTarget_vs_Reference=scan(file2, what=character(), sep="\n")
+  PositionAlignmentHeaders=grep(">", AlignmentTarget_vs_Reference)
+  Seq1Start=PositionAlignmentHeaders[1]+1
+  Seq1End=PositionAlignmentHeaders[2]-1
+  AlignmentTarget=AlignmentTarget_vs_Reference[Seq1Start:Seq1End]
+  Seq2Start=PositionAlignmentHeaders[2]+1
+  Seq2End=length(AlignmentTarget_vs_Reference)
+  AlignmentReference=AlignmentTarget_vs_Reference[Seq2Start:Seq2End]
+  AligmentTargetSplit=strsplit( paste(AlignmentTarget, collapse=""), split="")[[1]]
+  AlignmentReferenceSplit=strsplit( paste(AlignmentReference, collapse=""), split="")[[1]]
+  ListAlignments=list(AligmentTargetSplit,AlignmentReferenceSplit)
+  return(ListAlignments)
+}
+
+#read contact maps
+readContactMaps=function(file3){
+  readCM=scan(file3, what=character(), sep="\n")
+  endcomments=grep("#CUTOFF", readCM)
+  ContactMap=read.table(file3, sep="\t", skip=endcomments, header=F)[,c(1,2)]
+  colnames(ContactMap)=c("X","Y")
+  return(ContactMap)
+}
+
+#Obtain the numbering of amino acids within a sequence by itself and within the alignment
+#ListSplitAligments is obtained from function readAlignment
+numerationEquivalency=function(ListSplitAlignmets){
+  AligmentTarget=ListSplitAlignmets[[1]]
+  NumberingAligmentTarget=which(AligmentTarget!="-")
+  AlignmentReference=ListSplitAlignmets[[2]]
+  NumberingAlignmentReference=which(AlignmentReference!="-")
+  AlignmentNumberEquivalency=list(NumberingAligmentTarget,NumberingAlignmentReference)
+  return(AlignmentNumberEquivalency)
+}
+
+#Converting the natural numbering of the amino acids in the contact map into the 
+#numbering in the aligment
+#Variable Number is 1 for target, 2 for reference
+changeCMpositions=function(VectorNumbersInAlignment, ContactMap, Number){
+  CMnumbersAlignmentX=VectorNumbersInAlignment[[Number]][ContactMap$X]
+  CMnumbersAlignmentY=VectorNumbersInAlignment[[Number]][ContactMap$Y]
+  CMnumbersAlignment=data.frame(X=CMnumbersAlignmentX,Y=CMnumbersAlignmentY)
+  return(CMnumbersAlignment)
+}
+
+#Comparing two contact maps with residue numbering matching the one in the aligmnent
+compareCM=function(DataFrameEnzRef, DataFrameEnzTarget){
+  DataFrameContactCoincidences=apply(DataFrameEnzRef,1, function(x) x %in% apply(DataFrameEnzTarget,1, function(y) y))
+  CommonContactsRowNumber=which(DataFrameContactCoincidences[1,]*DataFrameContactCoincidences[2,]==1)   
+  CommonContacts=DataFrameEnzRef[CommonContactsRowNumber,] 
+  CommonContacts=cbind(CommonContacts,CommonContactsRowNumber)
+  return(CommonContacts)
+}
+
+#Reset the numbering of the common contacts to the numbering of the residues in the reference
+#Number is 1 for target, 2 for reference
+ResetNumbering=function(AlignmentReferenceOrTarget, CommonContacts, Number){
+  Alignment=AlignmentReferenceOrTarget[[Number]]
+  NumbersSequenceReferenceOrTargetX=sapply(CommonContacts[,1], function(x) which(Alignment==x))
+  NumbersSequenceReferenceOrTargetY=sapply(CommonContacts[,1], function(x) which(Alignment==x))
+  CommonContactsReferenceOrTargetSequence=data.frame(X=NumbersSequenceReferenceOrTargetX,Y=NumbersSequenceReferenceOrTargetY)
+  return(CommonContactsReferenceOrTargetSequence)
+}
+
+#Get the amino acids corresponding to the common contacts
+GetCommonContactsAminoAcids=function(ContactsInAlignmentNumbering,AlignmentSplit){
+  ResiduesX=AlignmentSplit[ContactsInAlignmentNumbering[,1]]
+  ResiduesY=AlignmentSplit[ContactsInAlignmentNumbering[,2]]
+  CommonResiduesList=list(X=ResiduesX, Y=ResiduesY)
+  return(CommonResiduesList)
+}
+
+
+#Create table of residues abundancy
+#Using the table registering the residues in each contact per enzyme, it creates
+#a table registering how many times a residue appear in each contact
+f_aminoAcidAbundancy=function(DataFrameAminoAcidsbyEnz,DataFrameAbundancy,aminoAcidsVector){
+  ListTableAbundancy=apply(DataFrameAminoAcidsbyEnz, 1, function(x) table(x))
+  for(rowN in (1:nrow(DataFrameAbundancy))){
+    for(aa in aminoAcidsVector){
+      if(is.na(ListTableAbundancy[[rowN]][aa])==F){
+        DataFrameAbundancy[rowN, aa]=as.vector(ListTableAbundancy[[rowN]][aa])
+      }else{
+        feigncounter=0
+      }
+    }
+  }
+  return(DataFrameAbundancy)
+}
+
+###############Actual program starts here
+
+#read all the enzymes to be used in the program ID
+IDtargets=readPDBID(path2pdbIDtarget)
+
+#read group1 enzymes' ID
+IDgroup1=readPDBID(path2pdbIDgroup1)
+
+#read group2 enzymes' ID
+IDgroup2=readPDBID(path2pdbIDgroup2)
+
+#read the contact map of the reference
+referenceCM=readContactMaps(paste(path2CM,referencePDB,".txt",sep=""))
+
+#create tables to store data
+generalTable=data.frame(matrix(0,ncol=length(IDtargets),nrow=nrow(referenceCM)))
+generalTable=cbind(referenceCM, generalTable)
+colnames(generalTable)=c("X","Y",IDtargets)
+
+#equivalent X contacts positions
+EquivPositionsX=generalTable
+#equivalent Y contacts positions
+EquivPositionsY=generalTable
+#equivalent X contacts amino acids
+EquivAmAcX=generalTable
+#equivalent Y contacts amino acids
+EquivAmAcY=generalTable
+
+for (enzyme_i in IDtargets){
+  aligment4analysis=readAlignment(paste(path2CMalignments,enzyme_i,".fasta",sep=""))
+  targetCM=readContactMaps(paste(path2CM,enzyme_i,".txt",sep=""))
+  SeqNumberedAfterAlignment=numerationEquivalency(aligment4analysis)  
+  RenumberedCMTarget=changeCMpositions(SeqNumberedAfterAlignment, targetCM, 1)
+  RenumberedCMRef=changeCMpositions(SeqNumberedAfterAlignment, referenceCM, 2)
+  CommonContactPairs=compareCM(RenumberedCMRef, RenumberedCMTarget)
+  AminoAcidsTargetCommonContacts=GetCommonContactsAminoAcids(CommonContactPairs,aligment4analysis[[1]])
+  PositionsTargetCommonContacts=ResetNumbering(SeqNumberedAfterAlignment,CommonContactPairs,1)
+  EquivPositionsX[CommonContactPairs[,3],enzyme_i]=PositionsTargetCommonContacts$X
+  EquivPositionsY[CommonContactPairs[,3],enzyme_i]=PositionsTargetCommonContacts$Y
+  EquivAmAcX[CommonContactPairs[,3],enzyme_i]=AminoAcidsTargetCommonContacts$X
+  EquivAmAcY[CommonContactPairs[,3],enzyme_i]=AminoAcidsTargetCommonContacts$Y
+}
+
+
+#get file names to store position and aminoacids data
+filenamesOutput1=paste(workingDirectory,"Output/",c("PositionX.txt","PositionY.txt","ResiduesX.txt","ResiduesY.txt"),sep="")
+
+#create header with the cutoff distance used and the contact type, as well as the program Used
+readCMdata=scan(paste(path2CM,referencePDB,".txt",sep=""), what=character(), sep="\n")
+cutoffLine=grep("#CUTOFF", readCMdata)
+contactType=grep("#CT", readCMdata)
+
+ImportantCMdata=readCMdata[c(1,contactType,cutoffLine)]
+  
+for(file_i in filenamesOutput1){
+  write(paste("#",date(),sep=""), file_i, append=F)
+  write(ImportantCMdata, file_i, append=T, sep="\n")
+  write(paste("#",referencePDB,sep=""), file_i, append=T)
+}
+
+write.table(EquivPositionsX,paste(workingDirectory,"Output/","PositionX.txt",sep=""), quote=F, sep="\t",append=T,row.names=F)
+write.table(EquivPositionsY,paste(workingDirectory,"Output/","PositionY.txt",sep=""), quote=F, sep="\t",append=T,row.names=F)
+write.table(EquivAmAcX,paste(workingDirectory,"Output/","ResiduesX.txt",sep=""), quote=F, sep="\t",append=T,row.names=F)
+write.table(EquivAmAcY,paste(workingDirectory,"Output/","ResiduesY.txt",sep=""), quote=F, sep="\t",append=T,row.names=F)
+
+#read ID of groups 1 and 2
+#group 1
+Group1ID=readPDBID(path2pdbIDgroup1)
+#group 2
+Group2ID=readPDBID(path2pdbIDgroup2)
+
+#Select columns containing only residue information
+CMresiuesWithoutContactInfoX=EquivAmAcX[,c(3:ncol(EquivAmAcX))]
+CMresiuesWithoutContactInfoY=EquivAmAcY[,c(3:ncol(EquivAmAcY))]
+
+#Select columns belonging to group 1
+CMresiduesGroup1X=EquivAmAcX[,Group1ID]
+CMresiduesGroup1Y=EquivAmAcY[,Group1ID]
+
+#Select columns belonging to group 2
+CMresiduesGroup2X=EquivAmAcX[,Group2ID]
+CMresiduesGroup2Y=EquivAmAcY[,Group2ID]
+
+
+
+#Calculate number of proteins in each group
+
+NumberEnzymesGroup1=length(Group1ID)
+NumberEnzymesGroup2=length(Group2ID)
+NumberEnzymesTotal=NumberEnzymesGroup1+NumberEnzymesGroup2
+
+#read amino acids
+aminoAcids=c("R","K","H","D","E","S","T","N","Q","C","G","P","A","V","I","L","M","F","Y","W")
+
+#Create table to store residues abundancy
+DataFrameResiduesAbundancy=data.frame(matrix(0,nrow=nrow(referenceCM),ncol=20))
+colnames(DataFrameResiduesAbundancy)=aminoAcids
+
+
+aminoacidPerEnzDataFrameList=list(CMresiuesWithoutContactInfoX,CMresiuesWithoutContactInfoY,CMresiduesGroup1X,CMresiduesGroup1Y,CMresiduesGroup2X,CMresiduesGroup2Y)
+aminoAcidsAbundancyDataFrames=list()
+
+#Create table of residues abundancy
+for(tableN in c(1:length(aminoacidPerEnzDataFrameList))){
+  aminoAcidsAbundancyDataFrames[[tableN]]=f_aminoAcidAbundancy(aminoacidPerEnzDataFrameList[[tableN]],DataFrameResiduesAbundancy,aminoAcids)
+}
+
+#Calculate contact conservation
+CMconservationGeneral=as.vector(apply(aminoAcidsAbundancyDataFrames[[1]],1, function(x) sum(x)))
+CMconservationGroup1=as.vector(apply(aminoAcidsAbundancyDataFrames[[3]],1, function(x) sum(x)))
+CMconservationGroup2=as.vector(apply(aminoAcidsAbundancyDataFrames[[5]],1, function(x) sum(x)))
+
+
+
+#Obtain the frequency of each aminoacid for each contact
+vectorNumberEnzymes=c(NumberEnzymesTotal,NumberEnzymesTotal,NumberEnzymesGroup1,NumberEnzymesGroup1,NumberEnzymesGroup2,NumberEnzymesGroup2)
+AminoAcidFrequencyDataFramesList=list()
+for(tableN in c(1:length(aminoacidPerEnzDataFrameList))){
+  AminoAcidFrequencyDataFramesList[[tableN]]=aminoAcidsAbundancyDataFrames[[tableN]]/vectorNumberEnzymes[tableN]
+}
+
+#########Calculate enrichment factor
+EnrichmentFactorDataFrameX=AminoAcidFrequencyDataFramesList[[3]]-AminoAcidFrequencyDataFramesList[[5]]
+EnrichmentFactorDataFrameY=AminoAcidFrequencyDataFramesList[[4]]-AminoAcidFrequencyDataFramesList[[6]]
+EnrichmentFactorDataFramesList=list(EnrichmentFactorDataFrameX,EnrichmentFactorDataFrameY)
+##########
+
+
+#get file names to store abundancy, frequency and enrichment
+filenamesOutputAbundancy=paste(workingDirectory,"Output/",c("AbundancyAllX.txt","AbundancyAllY.txt","AbundancyGroup1X.txt","AbundancyGroup1Y.txt","AbundancyGroup2X.txt","AbundancyGroup2Y.txt"),sep="")
+filenamesOutputFrequency=paste(workingDirectory,"Output/",c("FrequencyAllX.txt","FrequencyAllY.txt","FrequencyGroup1X.txt","FrequencyGroup1Y.txt","FrequencyGroup2X.txt","FrequencyGroup2Y.txt"),sep="")
+filenamesOutputEnrichment=paste(workingDirectory,"Output/",c("EnrichmentX.txt","EnrichmentY.txt"),sep="")
+
+OuputsNamesVector=c(filenamesOutputAbundancy,filenamesOutputFrequency,filenamesOutputEnrichment)
+
+#Obtaining data about the sample used in the analysis
+ImportantCMdataGroups=paste("#",c(readCMdata[c(1,contactType,cutoffLine)], paste(Group1name,"=",NumberEnzymesGroup1,sep=""), paste(Group2name,"=",NumberEnzymesGroup2,sep=""), paste("TotalEnzymes=",NumberEnzymesTotal,sep="")),sep="")
+
+#Write a header with data analysis.
+for(file_i in OuputsNamesVector){
+  write(paste("#",date(),sep=""), file_i, append=F)
+  write(ImportantCMdataGroups, file_i, append=T, sep="\n")
+  write(paste("#reference:",referencePDB,sep=""), file_i, append=T)
+}
+
+#Create a list storing the objects containing the data
+ListOfData=list(aminoAcidsAbundancyDataFrames,AminoAcidFrequencyDataFramesList,EnrichmentFactorDataFramesList)
+
+#Create a list with the file names
+ListOfNames=list(filenamesOutputAbundancy,filenamesOutputFrequency,filenamesOutputEnrichment)
+
+#Obtaining the contact pairs from the reference contact map
+CoordCM=referenceCM
+colnames(CoordCM)=c("ContactX","ContactY")
+
+#Write the files with the names in the list without comments of the data
+for(DataTableType in c(1:3)){
+  DataList=ListOfData[[DataTableType]]
+  NamesList=ListOfNames[[DataTableType]]
+  for(DataFrameN in c(1:length(DataList))){
+    DataFrameAlmost2print=DataList[[DataFrameN]]
+    DataFrame2print=cbind(CoordCM,DataFrameAlmost2print)
+    write.table(DataFrame2print,NamesList[DataFrameN], quote=F, sep="\t",append=T, row.names=F)
+  }
+}
+
+#Write the files with the names in the list without comments of the data used
+filenamesOutputEnrichmentExtra=paste(workingDirectory,"Output/","Extra",c("EnrichmentX.txt","EnrichmentY.txt"),sep="")
+
+SequenceRefAlignment=aligment4analysis[[2]]
+SequenceRef=SequenceRefAlignment[which(SequenceRefAlignment!="-")]
+ReferenceAACMx=SequenceRef[referenceCM[,"X"]]
+ReferenceAACMxDataFrame=data.frame("aa_reference"=ReferenceAACMx)
+ReferenceAACMy=SequenceRef[referenceCM[,"Y"]]
+ReferenceAACMyDataFrame=data.frame("aa_reference"=ReferenceAACMy)
+CMconservationGeneralDataFrame=data.frame("Conservation_General"=CMconservationGeneral)
+CMconservationGroup1DataFrame=data.frame("Conservation_Group1"=CMconservationGroup1)
+CMconservationGroup2DataFrame=data.frame("Conservation_Group2"=CMconservationGroup2)
+
+EnrichmentFactorDataFrameXextra=cbind(CoordCM,EnrichmentFactorDataFrameX,ReferenceAACMxDataFrame,CMconservationGeneralDataFrame,CMconservationGroup1DataFrame,CMconservationGroup2DataFrame)
+EnrichmentFactorDataFrameYextra=cbind(CoordCM,EnrichmentFactorDataFrameY,ReferenceAACMyDataFrame,CMconservationGeneralDataFrame,CMconservationGroup1DataFrame,CMconservationGroup2DataFrame)
+ListEnrichmentDataFramesExtra=list(EnrichmentFactorDataFrameXextra,EnrichmentFactorDataFrameYextra)
+
+for(file_i in c(1:length(filenamesOutputEnrichmentExtra))){
+  write(paste("#",date(),sep=""), filenamesOutputEnrichmentExtra[file_i], append=F)
+  write(paste("#",ImportantCMdataGroups,sep=""), filenamesOutputEnrichmentExtra[file_i], append=T, sep="\n")
+  write(paste("#reference:",referencePDB,sep=""), filenamesOutputEnrichmentExtra[file_i], append=T)
+  write.table(ListEnrichmentDataFramesExtra[file_i],filenamesOutputEnrichmentExtra[file_i], quote=F, sep="\t",append=T, row.names=F)
+}
