@@ -6,7 +6,7 @@ setwd(".../MyContactMethods/ComparingCM/alpha-amylase/")
 
 #create function to read table
 LeerTabla=function(tabla){
-  Tabla=data.frame(read.table(tabla, header=T, sep="\n"))
+  Tabla=data.frame(read.table(tabla, header=T, sep="\t"))
   return(Tabla)
 }
 
@@ -65,9 +65,8 @@ combinationAApairs=function(AAlist,combinations){ #creates matrix of amino acids
 listAApairs=combinationAApairs(aminoacidos,paresAminoAcids)
 
 #Create data frame to store the contact pairs in each hydrolase
-index4GH_df=names(GHindex)
-aaEnzGHx=EnzX[,index4GH_df]
-aaEnzGHy=EnzY[,index4GH_df]
+aaEnzGHx=EnzX[,GHindex+2]
+aaEnzGHy=EnzY[,GHindex+2]
 
 #Create data frame to store the contact pairs in each transferase
 aaEnzGTx=EnzX[,(GTindex+2)]
