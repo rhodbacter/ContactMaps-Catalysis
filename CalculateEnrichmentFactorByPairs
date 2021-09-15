@@ -1,0 +1,139 @@
+#R
+
+#This program calculates the enrichment factor for a pair the aminoacids in conctact
+#wrtie the directory where all the input and output files will be
+setwd(".../MyContactMethods/ComparingCM/alpha-amylase/")
+
+#create function to read table
+LeerTabla=function(tabla){
+  Tabla=data.frame(read.table(tabla, header=T, sep="\n"))
+  return(Tabla)
+}
+
+#write down the names of the files
+Archivos=c("Output/ResiduesX.txt","Output/ResiduesY.txt","Output/EnrichmentX.txt","Output/EnrichmentY.txt")
+
+#read the names of the enzymes and store them in vectors
+enzimas=scan("targetID.txt", what=character(), sep="\n")
+GHenzymesPDB=scan("hydrolaseID.txt", what=character(), sep="\n")
+GTenzymesPDB=scan("transferaseID.txt", what=character(), sep="\n")
+
+#Read the tables with the residues occupying each contact
+EnzX=LeerTabla(Archivos[1])
+EnzY=LeerTabla(Archivos[2])
+
+#rename columns as their name is altered during reading
+colnames(EnzX)=c("ResX","ResY", enzimas)
+colnames(EnzX)=c("ResX","ResY", enzimas)
+
+#create an object storing the 20 aminoacids
+aminoacidos=c("R","H","K","D","E","S","T","N","Q","C","G","P","A","V","I","L","M","F","Y","W")
+
+#Creat function to calculate the pair combinations with all the aminoacids
+comb_with_replacement <- function(n, r){ 
+  return( factorial(n + r - 1) / (factorial(r) * factorial(n - 1)) )
+} 
+
+#calculate the dimensions of a table to store all the possible residues combinations for all the contacts
+paresAminoAcids=comb_with_replacement(20,2) 
+contactos1LWJ=nrow(EnzX) 
+
+#create empty matrices to store the contact residue pairs for transferases and hydrolases
+patronContactosGH=matrix(0,ncol=contactos1LWJ,nrow=paresAminoAcids) 
+patronContactosGT=matrix(0,ncol=contactos1LWJ,nrow=paresAminoAcids)
+ContactMatrix=list(patronContactosGH,patronContactosGT)
+
+#store all the enzymes to used and store the positions of hydrolases and transferases
+GHindex = sapply(GHenzymesPDB, function(x) which(enzimas==x))
+GTindex = sapply(GTenzymesPDB, function(x) which(enzimas==x))
+
+#function to create all the residue combinations
+combinationAApairs=function(AAlist,combinations){ #creates matrix of amino acids combinations
+  AApairs=matrix("",ncol=2,nrow=combinations)
+  rowCount=0
+  for (site1 in 1:length(AAlist)){
+    for(site2 in site1:length(AAlist)){
+      rowCount=rowCount+1
+      AApairs[rowCount,1]=AAlist[site1]
+      AApairs[rowCount,2]=AAlist[site2]
+    }
+  }
+  return(AApairs)
+}
+
+#create the combinations of residues
+listAApairs=combinationAApairs(aminoacidos,paresAminoAcids)
+
+#Create data frame to store the contact pairs in each hydrolase
+index4GH_df=names(GHindex)
+aaEnzGHx=EnzX[,index4GH_df]
+aaEnzGHy=EnzY[,index4GH_df]
+
+#Create data frame to store the contact pairs in each transferase
+aaEnzGTx=EnzX[,(GTindex+2)]
+aaEnzGTy=EnzY[,GTindex+2]
+
+#Residues in contact pairs were store as separated entities when created here they are made one e.g. from "N" and "H" to "NH"
+aaContactsInventory=apply(listAApairs,1, function(x) paste(x, collapse=","))
+
+#Create a function that will take a data frame for an enzyme with the residue pairs with each residue in one column, will fuse each pair in on registry, then will determine to which residue pair registry corresponds and will save the residue pairs and the registry to which they correspond
+getPosAApair<-function(aaPairsDataFrame,matrixPatronContactos){
+  freqAApair=table(apply(aaPairsDataFrame,1, function(x) paste(x, collapse=",")))
+  listPosAApair<-lapply(names(freqAApair), function(y) which(matrixPatronContactos==y))
+  RowIndex<-which(unlist(lapply(listPosAApair, function(x) length(x)))!=0)
+  if ((length(RowIndex)!=0)==T) {
+    NaaPair=c()
+    rowAApair=c()
+    for(AApos in RowIndex){
+      NaaPair=c(NaaPair,as.vector(freqAApair[AApos]))
+      rowAApair=c(rowAApair,listPosAApair[[AApos]])
+    }
+    names(NaaPair)<-rowAApair
+  }else{
+    NaaPair=integer(0)
+  }
+  return(NaaPair)
+}
+
+#create a function that will take the data frames of the residues in each pair (position X and position Y) to fuse positions pairs into single registry and the identify the pair of residues in each position and store the information in a matrix keeping the count.
+filAApairMatrix<-function(AAinContactsX, AAinContactsY, aaCombinations,matrix2Fill){
+  for(contact in 1:nrow(AAinContactsX)){
+    EnzWithContact=which(AAinContactsX[contact,]!=0)
+    aaContacts=data.frame(x=t(AAinContactsX[contact,EnzWithContact]),y=t(AAinContactsY[contact,EnzWithContact]))
+    AApairsCombinations=list(aaContacts,rev(aaContacts))
+    for (combination in 1:2){
+      rowAApair<-getPosAApair(AApairsCombinations[[combination]], aaCombinations)
+      if(length(rowAApair!=0)){
+        for(pair in 1:length(rowAApair)){
+          rowNumber=as.numeric(names(rowAApair[pair]))
+          matrix2Fill[rowNumber,contact]=as.vector(rowAApair[pair])
+        }
+      }
+    }   
+  }
+  return(matrix2Fill)
+}
+
+
+#Identify for all contact pairs which residue pair occupies them and store the information for all enzymes
+patronContactosGT<-filAApairMatrix(aaEnzGTx, aaEnzGTy, aaContactsInventory, patronContactosGT)
+patronContactosGH<-filAApairMatrix(aaEnzGHx, aaEnzGHy, aaContactsInventory, patronContactosGH)
+
+
+#create labels for rows and columns with the pairs of residues and the contact pairs
+RowTags=paste(listAApairs[,1],listAApairs[,2],sep=",")
+ColTags=(paste(EnzX[,1],EnzY[,2],sep=","))
+
+#Normalize data with the number of enzymes, and obtain the enrichment factor (multiply by 100 to differentiate it from the joint analysis)
+matrixGH=patronContactosGH/11*100
+matrixGT=patronContactosGT/5*100
+difmatrix=matrixGT-matrixGH
+
+#label the enrichment matrix with the pairs of residues and the contact pairs
+colnames(difmatrix)=ColTags
+rownames(difmatrix)=RowTags
+
+#obtain the max and min value of enrichment for each contact pair
+VectorEnrichGT<-apply(difmatrix,2,max)
+VectorEnrichGH<-apply(difmatrix,2,min)
+
